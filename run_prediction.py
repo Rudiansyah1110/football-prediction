@@ -9,9 +9,8 @@ from model_over_under import train_over_under_model
 
 print("Running prediction pipeline...\n")
 
-
-team_name = "Liverpool"
-opponent_name = "Tottenham"
+team_name = "Wolves"
+opponent_name = "Brentford"
 
 with tqdm(total=5, desc="Pipeline progress") as pbar:
 
@@ -25,7 +24,11 @@ with tqdm(total=5, desc="Pipeline progress") as pbar:
     # 2. TRAIN MODELS
     # =========================
     result_pack = train_match_result_model(df)
-    ou_pack = train_over_under_model(df)
+    ou_models = {
+        2.5: train_over_under_model(df, 2.5),
+        3.5: train_over_under_model(df, 3.5),
+        4.5: train_over_under_model(df, 4.5),
+    }
     pbar.update(1)
 
     # unpack
@@ -43,27 +46,24 @@ with tqdm(total=5, desc="Pipeline progress") as pbar:
     pbar.update(1)
 
     # =========================
-    # 4. OVER / UNDER PROBABILITY
+    # 4. FUTURE MATCH
     # =========================
-    ou_model = ou_pack["model"]
-    ou_scaler = ou_pack["scaler"]
-
-    X_scaled = ou_scaler.transform(df[FEATURES].iloc[:8])
-    ou_prob = ou_model.predict_proba(X_scaled)
-    pbar.update(1)
-
-    # =========================
-    # 5. FUTURE MATCH
-    # =========================
-    future_match = build_future_match(
-        df,
-        team=team_name,
-        opponent=opponent_name
-    )
-
+    future_match = build_future_match(df, team_name, opponent_name)
     future_scaled = scaler_res.transform(future_match)
     future_pred = model_res.predict(future_scaled)
     future_prob = model_res.predict_proba(future_scaled)
+    pbar.update(1)
+
+    # =========================
+    # 5.OVER / UNDER PROBABILITY
+    # =========================
+    ou_results = {}
+
+    for th, pack in ou_models.items():
+        X_scaled = pack["scaler"].transform(future_match)
+        prob_under, prob_over = pack["model"].predict_proba(X_scaled)[0]
+        ou_results[th] = (prob_under, prob_over)
+
     pbar.update(1)
 
 
@@ -74,14 +74,12 @@ with tqdm(total=5, desc="Pipeline progress") as pbar:
 print("\n=== CONFUSION MATRIX ===")
 print(confusion_matrix(y_test, y_pred))
 
+print("\n=== FEATURE WEIGHTS ===")
+print(coef_df)
+
 print("\n=== CLASSIFICATION REPORT ===")
 print(classification_report(y_test, y_pred, target_names=le.classes_))
 
-print("\n=== PROBABILITIES ===")
-print(pd.DataFrame(
-    ou_prob,
-    columns=["prob_under_3_5", "prob_over_3_5"]
-))
 
 print("\n=== FUTURE MATCH PREDICTION ===")
 print(f"Predicted Team: {team_name} VS {opponent_name}")
@@ -90,5 +88,10 @@ print("Probabilities:")
 for cls, prob in zip(le.classes_, future_prob[0]):
     print(f"  {cls}: {prob:.2f}")
 
-print("\n=== FEATURE WEIGHTS ===")
-print(coef_df)
+print("\n=== PROBABILITIES ===")
+for cls, prob in zip(le.classes_, future_prob[0]):
+    print(f"  {cls}: {prob:.2f}")
+
+print("\n=== OVER / UNDER PROBABILITIES ===")
+for th, (u, o) in ou_results.items():
+    print(f"Over {th}: {o:.3f} | Under {th}: {u:.3f}")
